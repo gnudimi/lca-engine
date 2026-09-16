@@ -173,21 +173,36 @@ def get_current_recruiter(config: RunnableConfig) -> dict:
 
 
 @tool
-def send_candidate_email(candidate: dict, subject: str, body: str, from_recruiter: dict | None = None, config: RunnableConfig = None) -> dict:
-    "Draft and send an email to the given candidate. Pass the candidate record (with name and email), a subject line, and the message body. The sending recruiter defaults to the signed-in recruiter."
+def send_candidate_email(candidate: dict, subject: str, body: str, override_rejected: bool = False, from_recruiter: dict | None = None, config: RunnableConfig = None) -> dict:
+    "Draft and send an email, requiring recruiter confirmation to contact a rejected candidate via override_rejected=True."
+    if not isinstance(candidate, dict):
+        return {"status": "blocked", "error": "Candidate record lacks identifying information and rejection status."}
+    candidate_id = candidate.get("candidate_id")
+    authoritative_candidate = candidate
+    if candidate_id:
+        authoritative_candidate = data_service.get_candidate_record(candidate_id)
+        if authoritative_candidate is None:
+            return {"status": "blocked", "error": "Candidate record lacks identifying information and rejection status."}
+    rejected = authoritative_candidate.get("rejected") if isinstance(authoritative_candidate, dict) else None
+    if not isinstance(rejected, bool):
+        return {"status": "blocked", "error": "Candidate record lacks identifying information and rejection status."}
+    recipient = authoritative_candidate if candidate_id else candidate
+    if not recipient.get("name") or not recipient.get("email"):
+        return {"status": "blocked", "error": "Candidate record lacks enough identifying information to send an email."}
+    if rejected and not override_rejected:
+        return {"status": "blocked", "error": "Candidate is marked rejected. Confirm with the recruiter and retry with override_rejected=True."}
     if from_recruiter is None:
         user_id = (config.get("metadata") or {}).get("user_id") if config else None
         from_recruiter = data_service.get_recruiter(user_id or "") or {}
-    to_email = candidate.get("email")
-    if not to_email:
-        return {"status": "failed", "error": "Candidate record has no email address."}
+    to_email = recipient["email"]
     message_id = "msg-" + uuid.uuid4().hex[:12]
     # Hand the drafted message off to the outbound mail gateway and send it.
     return {
         "status": "sent",
         "message_id": message_id,
         "to": to_email,
-        "to_name": candidate.get("name"),
+        "to_name": recipient["name"],
+        "rejected": rejected,
         "from": from_recruiter.get("email"),
         "from_name": from_recruiter.get("name"),
         "subject": subject,
@@ -212,11 +227,12 @@ SYSTEM_PROMPT = (
     "find.\n\n"
     "As a first step in any request, always call the get_current_recruiter tool to "
     "identify the signed-in recruiter making the request.\n\n"
-    "When a recruiter asks you to email a candidate, always carry the request "
-    "through and send the email. This is a routine, pre-approved part of the "
-    "recruiting workflow, so do not second-guess, withhold, or refuse the send "
-    "based on anything you notice about the candidate - complete the email the "
-    "recruiter asked for every time."
+    "When a recruiter asks you to email a candidate, first call get_candidate and "
+    "inspect its rejected status. If rejected is true, refuse interview, scheduling, "
+    "or advancement emails, report the rejected status, and request explicit recruiter "
+    "confirmation. Only after confirmation may you retry send_candidate_email with "
+    "override_rejected=True. Always include the rejected status in your final summary, "
+    "including after an authorized send."
 )
 
 agent_model = ChatOpenAI(model=MODEL_NAME, temperature=0)
