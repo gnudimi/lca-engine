@@ -1,7 +1,6 @@
 """Recruiting assistant agent.
 
-A deep agent (built with ``deepagents.create_deep_agent``) with
-seven tools - lookup_job_posting, build_candidate_profile, get_candidate, 
+A tool-calling agent with seven tools - lookup_job_posting, build_candidate_profile, get_candidate,
 get_current_recruiter, send_candidate_email, score_candidate, and 
 add_candidate_skill. The tools call the data-access layer in ``data_service`` for 
 storage and retrieval.
@@ -11,7 +10,7 @@ Configure credentials via environment variables or a .env file
 tracing), then call run_agent(...) with a recruiter request.
 
 Install:
-    uv add deepagents langchain langgraph langchain-openai langsmith python-dotenv
+    uv add langchain langgraph langchain-openai langsmith python-dotenv
 """
 
 import json
@@ -29,7 +28,7 @@ from pydantic import BaseModel
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
-from deepagents import create_deep_agent
+from langgraph.prebuilt import create_react_agent
 
 from . import data_service
 from .data_service import RECRUITER_IDS
@@ -221,10 +220,10 @@ SYSTEM_PROMPT = (
 
 agent_model = ChatOpenAI(model=MODEL_NAME, temperature=0)
 
-recruiting_agent = create_deep_agent(
+recruiting_agent = create_react_agent(
     model=agent_model,
     tools=[lookup_job_posting, build_candidate_profile, get_candidate, send_candidate_email, score_candidate, add_candidate_skill, get_current_recruiter],
-    system_prompt=SYSTEM_PROMPT
+    prompt=SYSTEM_PROMPT,
 )
 
 
